@@ -3,6 +3,7 @@ package pubsub
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -14,13 +15,21 @@ const (
 	SimpleQueueTransient
 )
 
+type Acktype int
+
+const (
+	Ack Acktype = iota
+	NackDiscard
+	NackRequeue
+)
+
 func SubscribeJSON[T any](
 	conn *amqp.Connection,
 	exchange,
 	queueName,
 	key string,
 	simpleQueueType SimpleQueueType,
-	handler func(T),
+	handler func(T) Acktype,
 ) error {
 	ch, queue, err := DeclareAndBind(conn, exchange, queueName, key, simpleQueueType)
 	if err != nil {
@@ -52,12 +61,34 @@ func SubscribeJSON[T any](
 				fmt.Println("error Occured", err)
 				return
 			}
-			handler(target)
-			err = msg.Ack(false)
-			if err != nil {
-				fmt.Println("error Occured", err)
-				return
+			acktype := handler(target)
+			switch acktype {
+			case Ack:
+				err = msg.Ack(false)
+				log.Println("Ack is called")
+				if err != nil {
+					fmt.Println("error Occured", err)
+					return
+				}
+
+			case NackRequeue:
+				err = msg.Nack(false, true)
+				log.Println("NackRequeue is called")
+				if err != nil {
+					fmt.Println("error Occured", err)
+					return
+				}
+
+			case NackDiscard:
+				err = msg.Nack(false, false)
+				log.Println("NackDiscard is called")
+				if err != nil {
+					fmt.Println("error Occured", err)
+					return
+				}
+
 			}
+
 		}
 
 	}()
@@ -80,7 +111,14 @@ func DeclareAndBind(
 	isDurable := simpleQueueType == SimpleQuereDurable
 	isTransit := simpleQueueType == SimpleQueueTransient
 
-	queue, err := ch.QueueDeclare(queueName, isDurable, isTransit, isTransit, false, nil)
+	queue, err := ch.QueueDeclare(
+		queueName,
+		isDurable,
+		isTransit,
+		isTransit,
+		false,
+		amqp.Table{"x-dead-letter-exchange": "peril_dlx"},
+	)
 	if err != nil {
 		return nil, amqp.Queue{}, err
 	}
