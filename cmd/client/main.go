@@ -50,6 +50,7 @@ func main() {
 	if err != nil {
 		log.Fatal("Binding failed")
 	}
+	defer moveCh.Close()
 	fmt.Printf("Queue %v declared and bound! \n", queue.Name)
 
 	gameState := gamelogic.NewGameState(username)
@@ -66,6 +67,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("could not subscribe to pause: %v", err)
 	}
+
 	//comsume army_move
 	err = pubsub.SubscribeJSON(
 		conn,
@@ -73,10 +75,23 @@ func main() {
 		routing.ArmyMovesPrefix+"."+username,
 		routing.ArmyMovesPrefix+".*",
 		pubsub.SimpleQueueTransient,
-		HandleMove(gameState),
+		HandleMove(moveCh, gameState),
 	)
 	if err != nil {
 		log.Fatalf("could not subscribe to pause: %v", err)
+	}
+
+	//comsume war
+	err = pubsub.SubscribeJSON(
+		conn,
+		routing.ExchangePerilTopic,
+		"war",
+		routing.WarRecognitionsPrefix+".*",
+		pubsub.SimpleQuereDurable,
+		HandleWar(gameState),
+	)
+	if err != nil {
+		log.Fatalf("could not subscribe to war: %v", err)
 	}
 
 	//wait for ctrl +c
