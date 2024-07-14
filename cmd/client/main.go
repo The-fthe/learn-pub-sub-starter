@@ -20,38 +20,16 @@ func main() {
 	defer conn.Close()
 	fmt.Println("Peril game server connected to RabbitMQ!")
 
+	publishCh, err := conn.Channel()
+	if err != nil {
+		log.Fatalf("could not create: %v", err)
+	}
+
 	username, err := gamelogic.ClientWelcome()
 	if err != nil {
 		log.Fatalf("get username failed", err)
 		return
 	}
-
-	//subscribe to pause routing key
-	_, queue, err := pubsub.DeclareAndBind(
-		conn,
-		routing.ExchangePerilDirect,
-		routing.PauseKey+"."+username,
-		routing.PauseKey,
-		pubsub.SimpleQueueTransient,
-	)
-	if err != nil {
-		log.Fatal("Binding failed")
-	}
-	fmt.Printf("Queue %v declared and bound! \n", queue.Name)
-
-	//subscribe to army_move routing key
-	moveCh, queue, err := pubsub.DeclareAndBind(
-		conn,
-		routing.ExchangePerilDirect,
-		routing.ArmyMovesPrefix+"."+username,
-		routing.ArmyMovesPrefix,
-		pubsub.SimpleQueueTransient,
-	)
-	if err != nil {
-		log.Fatal("Binding failed")
-	}
-	defer moveCh.Close()
-	fmt.Printf("Queue %v declared and bound! \n", queue.Name)
 
 	gameState := gamelogic.NewGameState(username)
 
@@ -59,7 +37,7 @@ func main() {
 	err = pubsub.SubscribeJSON(
 		conn,
 		routing.ExchangePerilDirect,
-		routing.PauseKey+"."+username,
+		routing.PauseKey+"."+gameState.GetUsername(),
 		routing.PauseKey,
 		pubsub.SimpleQueueTransient,
 		HandlePause(gameState),
@@ -72,10 +50,10 @@ func main() {
 	err = pubsub.SubscribeJSON(
 		conn,
 		routing.ExchangePerilTopic,
-		routing.ArmyMovesPrefix+"."+username,
+		routing.ArmyMovesPrefix+"."+gameState.GetUsername(),
 		routing.ArmyMovesPrefix+".*",
 		pubsub.SimpleQueueTransient,
-		HandleMove(moveCh, gameState),
+		HandleMove(gameState, publishCh),
 	)
 	if err != nil {
 		log.Fatalf("could not subscribe to pause: %v", err)
@@ -85,19 +63,14 @@ func main() {
 	err = pubsub.SubscribeJSON(
 		conn,
 		routing.ExchangePerilTopic,
-		"war",
+		routing.WarRecognitionsPrefix,
 		routing.WarRecognitionsPrefix+".*",
 		pubsub.SimpleQuereDurable,
-		HandleWar(gameState),
+		HandleWar(gameState, publishCh),
 	)
 	if err != nil {
-		log.Fatalf("could not subscribe to war: %v", err)
+		log.Fatalf("could not subscribe to pause: %v", err)
 	}
-
-	//wait for ctrl +c
-	// signalChan := make(chan os.Signal, 1)
-	// signal.Notify(signalChan, os.Interrupt)
-	// <-signalChan
 
 	for {
 		words := gamelogic.GetInput()
@@ -119,7 +92,7 @@ func main() {
 				continue
 			}
 			err = pubsub.PublishJSON(
-				moveCh,
+				publishCh,
 				routing.ExchangePerilTopic,
 				routing.ArmyMovesPrefix+"."+username,
 				am,

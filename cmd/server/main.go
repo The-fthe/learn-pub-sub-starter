@@ -18,12 +18,6 @@ func main() {
 	defer amqp.Close()
 	fmt.Println("Peril game server connected to RabbitMQ!")
 
-	// ch, err := amqp.Channel()
-	// if err != nil {
-	// 	log.Fatalf("channel err: %v", err)
-	// 	return
-	// }
-
 	ch, queue, err := pubsub.DeclareAndBind(
 		amqp,
 		routing.ExchangePerilTopic,
