@@ -1,6 +1,8 @@
 package pubsub
 
 import (
+	"bytes"
+	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,7 +13,7 @@ import (
 type SimpleQueueType int
 
 const (
-	SimpleQuereDurable SimpleQueueType = iota
+	SimpleQueueDurable SimpleQueueType = iota
 	SimpleQueueTransient
 )
 
@@ -31,6 +33,60 @@ func SubscribeJSON[T any](
 	simpleQueueType SimpleQueueType,
 	handler func(T) Acktype,
 ) error {
+	return subscribe[T](
+		conn,
+		exchange,
+		queueName,
+		key,
+		simpleQueueType,
+		handler,
+		func(data []byte) (T, error) {
+			var target T
+			err := json.Unmarshal(data, &target)
+			return target, err
+		},
+	)
+}
+
+func SubscribeGob[T any](
+	conn *amqp.Connection,
+	exchange,
+	queueName,
+	key string,
+	simpleQueueType SimpleQueueType,
+	handler func(T) Acktype,
+) error {
+	unmarshaller := func(data []byte) (T, error) {
+		var target T
+		buffer := bytes.NewBuffer(data)
+		decoder := gob.NewDecoder(buffer)
+		err := decoder.Decode(&target)
+		if err != nil {
+			return target, err
+
+		}
+		return target, nil
+	}
+	return subscribe(
+		conn,
+		exchange,
+		queueName,
+		key,
+		simpleQueueType,
+		handler,
+		unmarshaller,
+	)
+}
+
+func subscribe[T any](
+	conn *amqp.Connection,
+	exchange,
+	queueName,
+	key string,
+	simpleQueueType SimpleQueueType,
+	handler func(T) Acktype,
+	unmarshaller func([]byte) (T, error),
+) error {
 	ch, queue, err := DeclareAndBind(conn, exchange, queueName, key, simpleQueueType)
 	if err != nil {
 		return err
@@ -48,24 +104,18 @@ func SubscribeJSON[T any](
 		return err
 	}
 
-	unmarshaller := func(data []byte) (T, error) {
-		var target T
-		err := json.Unmarshal(data, &target)
-		return target, err
-	}
 	go func() {
 		defer ch.Close()
 		for msg := range chDelivery {
 			target, err := unmarshaller(msg.Body)
 			if err != nil {
-				fmt.Println("error Occured", err)
+				fmt.Println("unmarshaller error Occured", err)
 				return
 			}
 			acktype := handler(target)
 			switch acktype {
 			case Ack:
 				err = msg.Ack(false)
-				log.Println("Ack is called")
 				if err != nil {
 					fmt.Println("error Occured", err)
 					return
@@ -73,22 +123,19 @@ func SubscribeJSON[T any](
 
 			case NackRequeue:
 				err = msg.Nack(false, true)
-				log.Println("NackRequeue is called")
 				if err != nil {
-					fmt.Println("error Occured", err)
+					fmt.Println("nack requeue  error Occured", err)
 					return
 				}
 
 			case NackDiscard:
 				err = msg.Nack(false, false)
-				log.Println("NackDiscard is called")
 				if err != nil {
-					fmt.Println("error Occured", err)
+					fmt.Println("nack discard error Occured", err)
 					return
 				}
 
 			}
-
 		}
 
 	}()
@@ -108,22 +155,25 @@ func DeclareAndBind(
 	if err != nil {
 		return nil, amqp.Queue{}, err
 	}
-	isDurable := simpleQueueType == SimpleQuereDurable
-	isTransit := simpleQueueType == SimpleQueueTransient
 
 	queue, err := ch.QueueDeclare(
-		queueName,
-		isDurable,
-		isTransit,
-		isTransit,
-		false,
-		amqp.Table{"x-dead-letter-exchange": "peril_dlx"},
+		queueName,                             // name
+		simpleQueueType == SimpleQueueDurable, // durable
+		simpleQueueType != SimpleQueueDurable, // delete when unused
+		simpleQueueType != SimpleQueueDurable, // exclusive
+		false,                                 // no-wait
+		amqp.Table{
+			"x-dead-letter-exchange": "peril_dlx",
+		},
 	)
-	if err != nil {
-		return nil, amqp.Queue{}, err
-	}
 
-	err = ch.QueueBind(queueName, key, exchange, false, nil)
+	err = ch.QueueBind(
+		queueName, //queue name
+		key,       //routing key
+		exchange,  //exchange
+		false,     //no wiat
+		nil,       //args
+	)
 	if err != nil {
 		return nil, amqp.Queue{}, err
 	}

@@ -65,7 +65,7 @@ func main() {
 		routing.ExchangePerilTopic,
 		routing.WarRecognitionsPrefix,
 		routing.WarRecognitionsPrefix+".*",
-		pubsub.SimpleQuereDurable,
+		pubsub.SimpleQueueDurable,
 		HandleWar(gameState, publishCh),
 	)
 	if err != nil {

@@ -2,35 +2,42 @@ package main
 
 import (
 	"fmt"
+	"log"
+
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/pubsub"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/routing"
 	amqp "github.com/rabbitmq/amqp091-go"
-	"log"
 )
 
 func main() {
-	amqp, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
+	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
 	if err != nil {
 		log.Fatalf("could not connect to RabbitMQ: %v", err)
 		return
 	}
-	defer amqp.Close()
+	defer conn.Close()
 	fmt.Println("Peril game server connected to RabbitMQ!")
 
-	ch, queue, err := pubsub.DeclareAndBind(
-		amqp,
+	publishCh, err := conn.Channel()
+	if err != nil {
+		log.Fatalf("could not create channel: %v", err)
+	}
+
+	gamelogic.PrintServerHelp()
+
+	//subscribe to game log
+	err = pubsub.SubscribeGob(
+		conn,
 		routing.ExchangePerilTopic,
 		routing.GameLogSlug,
 		routing.GameLogSlug+".*",
-		pubsub.SimpleQuereDurable)
+		pubsub.SimpleQueueDurable,
+		HandleLog(),
+	)
 	if err != nil {
-		log.Fatalf("could not subscribe to pause  err: %v", err)
-		return
+		fmt.Println("Subscribe Gob error", err.Error())
 	}
-	fmt.Printf("Queue %v declared and bound\n", queue.Name)
-
-	gamelogic.PrintServerHelp()
 
 	for {
 		words := gamelogic.GetInput()
@@ -40,9 +47,8 @@ func main() {
 		switch words[0] {
 
 		case "pause":
-			// err = pubsub.PublishJSON(ch, routing.ExchangePerilDirect, routing.PauseKey, routing.PlayingState{IsPaused: true})
 			err = pubsub.PublishJSON(
-				ch,
+				publishCh,
 				routing.ExchangePerilDirect,
 				routing.PauseKey,
 				routing.PlayingState{IsPaused: true},
@@ -53,9 +59,8 @@ func main() {
 			}
 			log.Println("Pause is trigger")
 		case "resume":
-			//err = pubsub.PublishJSON(ch, routing.ExchangePerilDirect, routing.PauseKey, routing.PlayingState{IsPaused: false})
 			err = pubsub.PublishJSON(
-				ch,
+				publishCh,
 				routing.ExchangePerilDirect,
 				routing.PauseKey,
 				routing.PlayingState{IsPaused: false},
