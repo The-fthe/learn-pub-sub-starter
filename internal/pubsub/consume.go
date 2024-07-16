@@ -5,7 +5,6 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
-	"log"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -91,6 +90,10 @@ func subscribe[T any](
 	if err != nil {
 		return err
 	}
+	err = ch.Qos(10, 0, false)
+	if err != nil {
+		return err
+	}
 	chDelivery, err := ch.Consume(
 		queue.Name, //queue
 		"",         //consumer
@@ -140,7 +143,6 @@ func subscribe[T any](
 
 	}()
 	return nil
-
 }
 
 func DeclareAndBind(

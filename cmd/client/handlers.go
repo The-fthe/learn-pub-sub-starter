@@ -12,7 +12,7 @@ import (
 
 func HandlePause(gs *gamelogic.GameState) func(routing.PlayingState) pubsub.Acktype {
 	return func(ps routing.PlayingState) pubsub.Acktype {
-		defer fmt.Print("> ")
+		defer fmt.Println("> ")
 		gs.HandlePause(ps)
 		return pubsub.Ack
 	}
@@ -20,7 +20,7 @@ func HandlePause(gs *gamelogic.GameState) func(routing.PlayingState) pubsub.Ackt
 
 func HandleMove(gs *gamelogic.GameState, publishCh *amqp.Channel) func(gamelogic.ArmyMove) pubsub.Acktype {
 	return func(move gamelogic.ArmyMove) pubsub.Acktype {
-		defer fmt.Print("> ")
+		defer fmt.Println("> ")
 		moveOutcome := gs.HandleMove(move)
 		switch moveOutcome {
 		case gamelogic.MoveOutcomeSamePlayer:
@@ -54,7 +54,7 @@ func HandleMove(gs *gamelogic.GameState, publishCh *amqp.Channel) func(gamelogic
 
 func HandleWar(gs *gamelogic.GameState, publishCh *amqp.Channel) func(dw gamelogic.RecognitionOfWar) pubsub.Acktype {
 	return func(dw gamelogic.RecognitionOfWar) pubsub.Acktype {
-		defer fmt.Print("> ")
+		defer fmt.Println("> ")
 
 		outcome, winner, loser := gs.HandleWar(dw)
 
